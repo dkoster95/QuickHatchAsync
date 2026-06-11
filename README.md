@@ -16,7 +16,7 @@ Add the package dependency to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com", from: "1.0.0")
+    .package(url: "https://github.com/dkoster95/QuickHatchAsync", from: "1.0.0")
 ]
 ```
 

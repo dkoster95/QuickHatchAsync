@@ -33,8 +33,6 @@ public final class TaskSerializer: TaskSerializing, @unchecked Sendable {
         id: String,
         operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
-        
-        
         // --- 1. Lock Context: Evict and Cancel the Stale Operation ---
         let record: ActiveTaskRecord<Value> = lock.withLock { state in
             if let existingAny = state[id],

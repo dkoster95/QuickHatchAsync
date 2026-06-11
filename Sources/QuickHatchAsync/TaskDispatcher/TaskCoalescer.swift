@@ -8,38 +8,37 @@
 import Foundation
 import os
 
+// 1. Thread-safe internal storage record.
+// Uses its own lock to guarantee atomic updates to the reference counter.
+internal final class RequestStorage<Value: Sendable>: @unchecked Sendable {
+    let task: Task<Value, Error>
+    private let lock = OSAllocatedUnfairLock(initialState: 0)
+    
+    var referenceCount: Int {
+        lock.withLock { $0 }
+    }
+    
+    init(task: Task<Value, Error>, initialCount: Int) {
+        self.task = task
+        self.lock.withLock { $0 = initialCount }
+    }
+    
+    func increment() {
+        lock.withLock { $0 += 1 }
+    }
+    
+    func decrement() -> Int {
+        lock.withLock {
+            $0 -= 1
+            return $0
+        }
+    }
+}
+
 /// A thread-safe request deduplicator that coalesces simultaneous asynchronous requests,
 /// tracks reference counts for safe cancellation, and evicts stalled tasks after a timeout.
 public final class TaskCoalescer: TaskCoalescing, @unchecked Sendable {
-    
     public static let shared = TaskCoalescer()
-    
-    // 1. Thread-safe internal storage record.
-    // Uses its own lock to guarantee atomic updates to the reference counter.
-    private final class RequestStorage<Value: Sendable>: @unchecked Sendable {
-        let task: Task<Value, Error>
-        private let lock = OSAllocatedUnfairLock(initialState: 0)
-        
-        var referenceCount: Int {
-            lock.withLock { $0 }
-        }
-        
-        init(task: Task<Value, Error>, initialCount: Int) {
-            self.task = task
-            self.lock.withLock { $0 = initialCount }
-        }
-        
-        func increment() {
-            lock.withLock { $0 += 1 }
-        }
-        
-        func decrement() -> Int {
-            lock.withLock {
-                $0 -= 1
-                return $0
-            }
-        }
-    }
     
     // Main lock protecting the dictionary structure
     private let lock = OSAllocatedUnfairLock(initialState: [String: any Sendable]())
@@ -51,9 +50,7 @@ public final class TaskCoalescer: TaskCoalescing, @unchecked Sendable {
         evictionTimeout: Duration = .seconds(30),
         operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
-        
         let storage: RequestStorage<Value>
-        
         // --- Lock Context 1: Find or Register Task ---
         let registration = lock.withLock { state -> (RequestStorage<Value>, Bool) in
             if let existingAny = state[id],
@@ -110,9 +107,7 @@ public final class TaskCoalescer: TaskCoalescing, @unchecked Sendable {
                 return (newStorage, true)
             }
         }
-        
         storage = registration.0
-        
         // --- 2. Structured Execution & Cancellation Handler ---
         return try await withTaskCancellationHandler {
             try await storage.task.value
